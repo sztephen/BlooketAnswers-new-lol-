@@ -1,0 +1,189 @@
+(function() {
+    // State management with visibility tracking
+    const state = {
+        hasProcessedData: false,
+        questionBank: null,
+        monitorInterval: null,
+        lastProcessedQuestion: null,
+        displayElement: null,
+        isVisible: true,          // Track visibility state
+        clickableArea: null,      // Invisible click area
+        lastPosition: { top: 0, right: 0 } // Store position for toggle
+    };
+
+    // Constants for styling and configuration
+    const STYLES = {
+        display: `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 999999;
+            font-family: Arial, sans-serif;
+            min-width: 250px;
+            cursor: pointer;
+            transition: opacity 0.3s ease;
+        `,
+        clickArea: `
+            position: fixed;
+            width: 50px;
+            height: 50px;
+            cursor: pointer;
+            z-index: 999998;
+        `
+    };
+
+    // Create invisible clickable area for toggling
+    function createClickableArea(top, right) {
+        if (!state.clickableArea) {
+            state.clickableArea = document.createElement('div');
+            state.clickableArea.style.cssText = STYLES.clickArea;
+            document.body.appendChild(state.clickableArea);
+        }
+        
+        // Position the clickable area where the display was
+        state.clickableArea.style.top = `${top}px`;
+        state.clickableArea.style.right = `${right}px`;
+        
+        // Add click handler
+        state.clickableArea.onclick = toggleDisplay;
+    }
+
+    // Toggle display visibility
+    function toggleDisplay() {
+        state.isVisible = !state.isVisible;
+        
+        if (state.displayElement) {
+            if (state.isVisible) {
+                state.displayElement.style.opacity = '1';
+                state.displayElement.style.pointerEvents = 'auto';
+                state.clickableArea.style.display = 'none';
+            } else {
+                // Store current position before hiding
+                const rect = state.displayElement.getBoundingClientRect();
+                state.lastPosition = {
+                    top: rect.top,
+                    right: window.innerWidth - rect.right
+                };
+                
+                state.displayElement.style.opacity = '0';
+                state.displayElement.style.pointerEvents = 'none';
+                
+                // Show clickable area in same position
+                createClickableArea(state.lastPosition.top, state.lastPosition.right);
+                state.clickableArea.style.display = 'block';
+            }
+        }
+    }
+
+    // Enhanced display element creation with click handling
+    function getDisplayElement() {
+        if (!state.displayElement) {
+            state.displayElement = document.createElement('div');
+            state.displayElement.style.cssText = STYLES.display;
+            
+            // Add click handler to the display element
+            state.displayElement.onclick = toggleDisplay;
+            
+            document.body.appendChild(state.displayElement);
+        }
+        return state.displayElement;
+    }
+
+    // Process API response data
+    function processQuestionData(data) {
+        if (!data || !data.questions || state.hasProcessedData) return;
+        state.questionBank = data.questions;
+        console.log('✓ Loaded question bank');
+    }
+
+    // Update display with question and answer
+    function showAnswer(question, answer) {
+        const display = getDisplayElement();
+        display.innerHTML = `
+            <div>${question}</div>
+            <div style="color: #2ecc71; margin-top: 10px;">
+                <strong>${answer}</strong>
+            </div>
+        `;
+    }
+
+    // Question matching and answer display logic
+    function findAndDisplayAnswer(text) {
+        if (!state.questionBank || text === state.lastProcessedQuestion) return;
+        
+        const match = state.questionBank.find(q => 
+            q.question.toLowerCase().trim() === text.toLowerCase().trim()
+        );
+
+        if (match) {
+            console.log(`Found question: "${text}"`);
+            console.log(`Answer: ${match.correctAnswers[0]}`);
+            showAnswer(match.question, match.correctAnswers[0]);
+            state.lastProcessedQuestion = text;
+        }
+    }
+
+    // DOM scanning for questions
+    function scanForQuestions() {
+        const divs = document.querySelectorAll('div[style*="display: block"]');
+        
+        divs.forEach(div => {
+            const text = div.textContent?.trim();
+            if (text && text.length > 10 && !text.match(/^\d+$/)) {
+                findAndDisplayAnswer(text);
+            }
+        });
+    }
+
+    // Network monitoring implementation
+    function startNetworkMonitoring() {
+        function checkNetworkEntries() {
+            const entries = performance.getEntriesByType('resource');
+            
+            const questionSetEntry = entries.find(entry => 
+                entry.name.includes('blooket.com/api/questionsets')
+            );
+            
+            if (questionSetEntry) {
+                fetch(questionSetEntry.name)
+                    .then(response => response.json())
+                    .then(data => processQuestionData(data))
+                    .catch(error => console.error('Error:', error));
+            }
+        }
+
+        // Regular interval for checking network and scanning DOM
+        state.monitorInterval = setInterval(() => {
+            checkNetworkEntries();
+            if (state.questionBank) {
+                scanForQuestions();
+            }
+        }, 500);
+
+        console.log('Monitoring started...');
+    }
+
+    // Enhanced cleanup utility
+    window.stopAnswerFinder = function() {
+        if (state.monitorInterval) {
+            clearInterval(state.monitorInterval);
+            state.monitorInterval = null;
+        }
+        if (state.displayElement) {
+            document.body.removeChild(state.displayElement);
+            state.displayElement = null;
+        }
+        if (state.clickableArea) {
+            document.body.removeChild(state.clickableArea);
+            state.clickableArea = null;
+        }
+        console.log('Monitoring stopped');
+    };
+
+    // Initialize the system
+    startNetworkMonitoring();
+})();
